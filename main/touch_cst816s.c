@@ -44,7 +44,7 @@ static portMUX_TYPE s_touch_mutex = portMUX_INITIALIZER_UNLOCKED;
 /**
  * @brief 触摸中断回调函数
  */
-static void touch_interrupt_callback(void *arg)
+static void touch_interrupt_callback(esp_lcd_touch_t *tp)
 {
     portENTER_CRITICAL_ISR(&s_touch_mutex);
     s_touch_event_flag = true;
