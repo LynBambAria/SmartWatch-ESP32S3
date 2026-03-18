@@ -15,4 +15,3 @@
 #include "driver/gpio.h"
 
 void max30102_init();
-void get_temp();
