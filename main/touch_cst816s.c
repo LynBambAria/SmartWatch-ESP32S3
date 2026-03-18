@@ -191,7 +191,8 @@ bool touch_cst816s_poll(touch_point_t *point)
     }
     portEXIT_CRITICAL(&s_touch_mutex);
     
-    // 只有在有触摸事件时才读取数据
+    // 只有在有触摸事件时才读取触摸数据
+    // 这样可以减少I2C通信，提高系统性能
     esp_err_t ret = ESP_OK;
     if (has_touch_event) {
         // 读取触摸数据
