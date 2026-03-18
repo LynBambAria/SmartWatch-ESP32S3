@@ -18,7 +18,10 @@ static const char *TAG = "max30102";
 #define MAX30102_PART_ID_REG_ADDR 0xff
 
 // 传感器状态
-static bool sensor_active = false;
+bool sensor_active = false;
+static bool sensor_present = false;
+
+uint8_t xinlv = 0;           // 计算得到的心率值
 
 /**
  * @brief init the i2c port for MAX30102
@@ -172,24 +175,56 @@ static esp_err_t max30102_gpio_init()
 
 void get_temp()
 {
+    if (!sensor_present) {
+        ESP_LOGI(TAG, "MAX30102 sensor not present, skipping temperature reading");
+        return;
+    }
+    
     uint8_t byte[2];
     float temp;
-    ESP_ERROR_CHECK(max30102_register_write_byte(0x21, 0x01));
+    esp_err_t err = max30102_register_write_byte(0x21, 0x01);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start temperature measurement: %s", esp_err_to_name(err));
+        return;
+    }
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_ERROR_CHECK(max30102_register_read(0x1f, &byte[0], 1));
-    ESP_ERROR_CHECK(max30102_register_read(0x20, &byte[1], 1));
+    err = max30102_register_read(0x1f, &byte[0], 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read temperature MSB: %s", esp_err_to_name(err));
+        return;
+    }
+    err = max30102_register_read(0x20, &byte[1], 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read temperature LSB: %s", esp_err_to_name(err));
+        return;
+    }
     temp = (int8_t)(byte[0]) + byte[1] * 0.0625;
     printf("Temp: %f\n", temp);
 
     // FIFO
-    ESP_ERROR_CHECK(max30102_register_write_byte(0x04, 0x00)); // clear FIFO Write Pointer
-    ESP_ERROR_CHECK(max30102_register_write_byte(0x05, 0x00)); // clear FIFO Overflow Counter
-    ESP_ERROR_CHECK(max30102_register_write_byte(0x06, 0x00)); // clear FIFO Read Pointer
+    err = max30102_register_write_byte(0x04, 0x00); // clear FIFO Write Pointer
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear FIFO Write Pointer: %s", esp_err_to_name(err));
+    }
+    err = max30102_register_write_byte(0x05, 0x00); // clear FIFO Overflow Counter
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear FIFO Overflow Counter: %s", esp_err_to_name(err));
+    }
+    err = max30102_register_write_byte(0x06, 0x00); // clear FIFO Read Pointer
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear FIFO Read Pointer: %s", esp_err_to_name(err));
+    }
 
     // clear PPG_RDY ! Cannot receive the first interrupt without clearing !
     uint8_t status_data;
-    ESP_ERROR_CHECK(max30102_register_read(0x00, &status_data, 1));
-    ESP_ERROR_CHECK(max30102_register_read(0x01, &status_data, 1));
+    err = max30102_register_read(0x00, &status_data, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read status register 0x00: %s", esp_err_to_name(err));
+    }
+    err = max30102_register_read(0x01, &status_data, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read status register 0x01: %s", esp_err_to_name(err));
+    }
 }
 
 void gpio_intr_task()
@@ -197,72 +232,79 @@ void gpio_intr_task()
     uint8_t buffer[6];
     int data[2];
     float xueyang;
-    uint8_t xinlv;
+    // uint8_t xinlv;
     int error_count = 0;
     
     // 定期检查是否有物体靠近传感器
     while (1) {
-        // 读取传感器数据
-        esp_err_t err = max30102_register_read(0x07, &buffer[0], 6);
-        if (err == ESP_OK) {
-            error_count = 0; // 重置错误计数
-            data[0] = ((buffer[0] << 16 | buffer[1] << 8 | buffer[2]) & 0x03ffff);
-            data[1] = ((buffer[3] << 16 | buffer[4] << 8 | buffer[5]) & 0x03ffff);
+        // 检查传感器是否存在
+        if (sensor_present) {
+            // 读取传感器数据
+            esp_err_t err = max30102_register_read(0x07, &buffer[0], 6);
+            if (err == ESP_OK) {
+                error_count = 0; // 重置错误计数
+                data[0] = ((buffer[0] << 16 | buffer[1] << 8 | buffer[2]) & 0x03ffff);
+                data[1] = ((buffer[3] << 16 | buffer[4] << 8 | buffer[5]) & 0x03ffff);
 
-            // 检测是否有物体靠近（光被挡住）
-            if (data[0] >= 50000) {  // 阈值可以根据实际情况调整
-                if (!sensor_active) {
-                    // 检测到物体靠近，开始正常检测
-                    ESP_LOGI(TAG, "检测到物体靠近，开始血氧和心率检测");
-                    sensor_active = true;
-                    
-                    // 增加LED亮度以获得更好的信号
-                    esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x7f, 3); // LED1_PA(red) = 0x7f, 最大亮度
-                    if (led_err == ESP_OK) {
-                        max30102_register_write_with_retry(0x0d, 0x7f, 3); // LED2_PA(IR) = 0x7f, 最大亮度
+                // 检测是否有物体靠近（光被挡住）
+                if (data[0] >= 50000) {  // 阈值可以根据实际情况调整
+                    if (!sensor_active) {
+                        // 检测到物体靠近，开始正常检测
+                        ESP_LOGI(TAG, "检测到物体靠近，开始血氧和心率检测");
+                        sensor_active = true;
+                        
+                        // 增加LED亮度以获得更好的信号
+                        esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x7f, 3); // LED1_PA(red) = 0x7f, 最大亮度
+                        if (led_err == ESP_OK) {
+                            max30102_register_write_with_retry(0x0d, 0x7f, 3); // LED2_PA(IR) = 0x7f, 最大亮度
+                        }
+                    }
+
+                    // 只有当传感器激活时才计算和输出数据
+                    if (sensor_active && data[0] >= 100000) {
+                        xueyang = (float)(data[1]) / (float)(data[0]);
+                        xinlv = 30.354 * xueyang + 94.845 - 45.060 * xueyang * xueyang;
+                        printf("血氧:%f,心率:%d\n", xueyang * 100, xinlv);
+                    }
+                } else {
+                    if (sensor_active) {
+                        // 物体移开，停止检测
+                        ESP_LOGI(TAG, "物体移开，停止血氧和心率检测");
+                        sensor_active = false;
+                        
+                        // 降低LED亮度以节省功耗
+                        esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x10, 3); // LED1_PA(red) = 0x10, 低亮度
+                        if (led_err == ESP_OK) {
+                            max30102_register_write_with_retry(0x0d, 0x10, 3); // LED2_PA(IR) = 0x10, 低亮度
+                        }
+                        printf("没有手指检测\n");
                     }
                 }
 
-                // 只有当传感器激活时才计算和输出数据
-                if (sensor_active && data[0] >= 100000) {
-                    xueyang = (float)(data[1]) / (float)(data[0]);
-                    xinlv = 30.354 * xueyang + 94.845 - 45.060 * xueyang * xueyang;
-                    printf("血氧:%f,心率:%d\n", xueyang * 100, xinlv);
-                }
+                // clear PPG_RDY ! Cannot receive the first interrupt without clearing !
+                uint8_t status_data;
+                max30102_register_read(0x00, &status_data, 1);
+                max30102_register_read(0x01, &status_data, 1);
             } else {
-                if (sensor_active) {
-                    // 物体移开，停止检测
-                    ESP_LOGI(TAG, "物体移开，停止血氧和心率检测");
-                    sensor_active = false;
-                    
-                    // 降低LED亮度以节省功耗
-                    esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x10, 3); // LED1_PA(red) = 0x10, 低亮度
-                    if (led_err == ESP_OK) {
-                        max30102_register_write_with_retry(0x0d, 0x10, 3); // LED2_PA(IR) = 0x10, 低亮度
-                    }
-                    printf("没有手指检测\n");
+                error_count++;
+                if (error_count % 10 == 0) { // 每10次错误才打印一次，避免日志刷屏
+                    ESP_LOGE(TAG, "Failed to read sensor data: %s (error count: %d)", esp_err_to_name(err), error_count);
+                }
+                // 如果连续错误超过20次，可能是硬件问题，暂停一段时间
+                if (error_count > 20) {
+                    ESP_LOGE(TAG, "Too many consecutive errors, pausing for 5 seconds");
+                    vTaskDelay(pdMS_TO_TICKS(5000));
+                    error_count = 0;
                 }
             }
-
-            // clear PPG_RDY ! Cannot receive the first interrupt without clearing !
-            uint8_t status_data;
-            max30102_register_read(0x00, &status_data, 1);
-            max30102_register_read(0x01, &status_data, 1);
+            
+            // 控制检测频率，避免过于频繁的读取
+            vTaskDelay(pdMS_TO_TICKS(200)); // 增加延迟到200毫秒，减少I2C操作频率
         } else {
-            error_count++;
-            if (error_count % 10 == 0) { // 每10次错误才打印一次，避免日志刷屏
-                ESP_LOGE(TAG, "Failed to read sensor data: %s (error count: %d)", esp_err_to_name(err), error_count);
-            }
-            // 如果连续错误超过20次，可能是硬件问题，暂停一段时间
-            if (error_count > 20) {
-                ESP_LOGE(TAG, "Too many consecutive errors, pausing for 5 seconds");
-                vTaskDelay(pdMS_TO_TICKS(5000));
-                error_count = 0;
-            }
+            // 传感器不存在，降低轮询频率，减少系统负担
+            ESP_LOGI(TAG, "MAX30102 sensor not present, reducing polling frequency");
+            vTaskDelay(pdMS_TO_TICKS(5000)); // 5秒检查一次
         }
-        
-        // 控制检测频率，避免过于频繁的读取
-        vTaskDelay(pdMS_TO_TICKS(200)); // 增加延迟到200毫秒，减少I2C操作频率
     }
 }
 
@@ -284,106 +326,113 @@ void max30102_init()
         ESP_LOGI(TAG, "MAX30102 GPIO initialized successfully");
     }
 
-    // 启动传感器轮询任务
-    xTaskCreate(gpio_intr_task, "max30102_poll", 2048, NULL, 5, NULL);
-    ESP_LOGI(TAG, "MAX30102 sensor polling task started");
+    // 启动传感器轮询任务，增加堆栈大小以避免堆栈溢出
+    xTaskCreate(gpio_intr_task, "max30102_poll", 4096, NULL, 5, NULL);
+    ESP_LOGI(TAG, "MAX30102 sensor polling task started with increased stack size");
 
     // 先尝试读取设备ID，确认I2C连接是否正常
     uint8_t part_id;
     err = max30102_register_read_with_retry(MAX30102_PART_ID_REG_ADDR, &part_id, 1, 3);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "MAX30102 device ID: 0x%02x", part_id);
+        sensor_present = true;
     } else {
         ESP_LOGE(TAG, "Failed to read MAX30102 device ID: %s", esp_err_to_name(err));
         ESP_LOGE(TAG, "This indicates a hardware connection issue or incorrect I2C configuration");
+        sensor_present = false;
         // 继续执行，不因为读取ID失败而停止
     }
 
-    // reset
-    err = max30102_register_write_with_retry(0x09, 0x40, 3);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 reset failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为重置失败而停止
+    // 只有当传感器存在时才进行配置
+    if (sensor_present) {
+        // reset
+        err = max30102_register_write_with_retry(0x09, 0x40, 3);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 reset failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为重置失败而停止
+        } else {
+            ESP_LOGI(TAG, "MAX30102 reset successful");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // mode configuration
+        err = max30102_register_write_with_retry(0x09, 0x03, 3); // 0x03 for SpO2 mode
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 mode configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为模式配置失败而停止
+        } else {
+            ESP_LOGI(TAG, "MAX30102 mode configured for SpO2");
+        }
+
+        // 设置LED亮度
+        err = max30102_register_write_with_retry(0x0c, 0x10, 3); // LED1_PA(red) = 0x10, 低亮度
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 LED1 brightness configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为亮度配置失败而停止
+        }
+
+        err = max30102_register_write_with_retry(0x0d, 0x10, 3); // LED2_PA(IR) = 0x10, 低亮度
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 LED2 brightness configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为亮度配置失败而停止
+        }
+
+        // 设置采样率
+        err = max30102_register_write_with_retry(0x0a, 0x00, 3); // 100Hz
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 sample rate configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为采样率配置失败而停止
+        } else {
+            ESP_LOGI(TAG, "MAX30102 sample rate set to 100Hz");
+        }
+
+        // 设置脉冲宽度
+        err = max30102_register_write_with_retry(0x0b, 0x02, 3); // 1600us
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 pulse width configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为脉冲宽度配置失败而停止
+        } else {
+            ESP_LOGI(TAG, "MAX30102 pulse width set to 1600us");
+        }
+
+        // 设置ADC范围
+        err = max30102_register_write_with_retry(0x0f, 0x03, 3); // 8192
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 ADC range configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为ADC范围配置失败而停止
+        } else {
+            ESP_LOGI(TAG, "MAX30102 ADC range set to 8192");
+        }
+
+        // FIFO
+        err = max30102_register_write_with_retry(0x04, 0x00, 3); // clear FIFO Write Pointer
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 FIFO Write Pointer configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为FIFO配置失败而停止
+        }
+
+        err = max30102_register_write_with_retry(0x05, 0x00, 3); // clear FIFO Overflow Counter
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 FIFO Overflow Counter configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为FIFO配置失败而停止
+        }
+
+        err = max30102_register_write_with_retry(0x06, 0x00, 3); // clear FIFO Read Pointer
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "MAX30102 FIFO Read Pointer configuration failed: %s", esp_err_to_name(err));
+            // 继续执行，不因为FIFO配置失败而停止
+        } else {
+            ESP_LOGI(TAG, "MAX30102 FIFO configuration completed");
+        }
+
+        // clear PPG_RDY ! Cannot receive the first interrupt without clearing !
+        uint8_t status_data;
+        max30102_register_read(0x00, &status_data, 1);
+        max30102_register_read(0x01, &status_data, 1);
     } else {
-        ESP_LOGI(TAG, "MAX30102 reset successful");
+        ESP_LOGI(TAG, "MAX30102 sensor not present, skipping configuration");
     }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // mode configuration
-    err = max30102_register_write_with_retry(0x09, 0x03, 3); // 0x03 for SpO2 mode
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 mode configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为模式配置失败而停止
-    } else {
-        ESP_LOGI(TAG, "MAX30102 mode configured for SpO2");
-    }
-
-    // 设置LED亮度
-    err = max30102_register_write_with_retry(0x0c, 0x10, 3); // LED1_PA(red) = 0x10, 低亮度
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 LED1 brightness configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为亮度配置失败而停止
-    }
-
-    err = max30102_register_write_with_retry(0x0d, 0x10, 3); // LED2_PA(IR) = 0x10, 低亮度
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 LED2 brightness configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为亮度配置失败而停止
-    }
-
-    // 设置采样率
-    err = max30102_register_write_with_retry(0x0a, 0x00, 3); // 100Hz
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 sample rate configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为采样率配置失败而停止
-    } else {
-        ESP_LOGI(TAG, "MAX30102 sample rate set to 100Hz");
-    }
-
-    // 设置脉冲宽度
-    err = max30102_register_write_with_retry(0x0b, 0x02, 3); // 1600us
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 pulse width configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为脉冲宽度配置失败而停止
-    } else {
-        ESP_LOGI(TAG, "MAX30102 pulse width set to 1600us");
-    }
-
-    // 设置ADC范围
-    err = max30102_register_write_with_retry(0x0f, 0x03, 3); // 8192
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 ADC range configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为ADC范围配置失败而停止
-    } else {
-        ESP_LOGI(TAG, "MAX30102 ADC range set to 8192");
-    }
-
-    // FIFO
-    err = max30102_register_write_with_retry(0x04, 0x00, 3); // clear FIFO Write Pointer
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 FIFO Write Pointer configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为FIFO配置失败而停止
-    }
-
-    err = max30102_register_write_with_retry(0x05, 0x00, 3); // clear FIFO Overflow Counter
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 FIFO Overflow Counter configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为FIFO配置失败而停止
-    }
-
-    err = max30102_register_write_with_retry(0x06, 0x00, 3); // clear FIFO Read Pointer
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "MAX30102 FIFO Read Pointer configuration failed: %s", esp_err_to_name(err));
-        // 继续执行，不因为FIFO配置失败而停止
-    } else {
-        ESP_LOGI(TAG, "MAX30102 FIFO configuration completed");
-    }
-
-    // clear PPG_RDY ! Cannot receive the first interrupt without clearing !
-    uint8_t status_data;
-    max30102_register_read(0x00, &status_data, 1);
-    max30102_register_read(0x01, &status_data, 1);
 
     ESP_LOGI(TAG, "MAX30102 initialization completed");
 }
