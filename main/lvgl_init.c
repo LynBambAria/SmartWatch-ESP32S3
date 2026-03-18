@@ -10,7 +10,15 @@
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
+#include "FreeRTOS/timers.h"
+#include "esp_sleep.h"
+#include "custom.h"
 // #include "button_gpio.h"
+
+// 触摸引脚定义
+#ifndef CST816S_INT
+#define CST816S_INT  7
+#endif
 
 static const char *TAG = "LVGL_INIT";
 
@@ -21,6 +29,10 @@ lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *touch_indev = NULL;  // 静态变量，仅在当前文件使用
 // lv_indev_t *disp_indev = NULL;
 // button_handle_t encoder_btn_handle = NULL;
+
+/* 屏幕背光控制变量 */
+static bool screen_on = true;
+static TimerHandle_t screen_timer = NULL;
 
 // /* 编码器配置定义 */
 // const button_gpio_config_t encoder_btn_config = {
@@ -54,6 +66,123 @@ extern const nv3030b_lcd_init_cmd_t lcd_init_cmds[];
 /* ============================================
  * 函数实现
  * ============================================ */
+
+/**
+ * @brief 打开屏幕背光
+ */
+void screen_turn_on(void)
+{
+    if (!screen_on) {
+        // 先恢复LVGL显示刷新
+        if (lvgl_disp != NULL) {
+            lvgl_port_lock(0);
+            lv_disp_enable_invalidation(lvgl_disp, true);
+            
+            // 触发全屏重绘
+            lv_obj_t *screen = lv_screen_active();
+            if (screen != NULL) {
+                lv_obj_invalidate(screen);
+            }
+            
+            // 强制刷新显示
+            lv_refr_now(lvgl_disp);
+            
+            lvgl_port_unlock();
+            ESP_LOGI(TAG, "LVGL display reactivated");
+        }
+        
+        // 再打开背光
+        gpio_set_level(EXAMPLE_PIN_NUM_BK_LIGHT, EXAMPLE_LCD_BK_LIGHT_ON_LEVEL);
+        screen_on = true;
+        
+        // 恢复心率定时器
+        heart_timer_resume();
+        
+        // 重新启动屏幕定时器
+        reset_screen_timer();
+        
+        ESP_LOGI(TAG, "Screen turned on");
+    }
+}
+
+/**
+ * @brief 关闭屏幕背光
+ */
+void screen_turn_off(void)
+{
+    if (screen_on) {
+        // 先暂停心率定时器，避免在屏幕关闭时继续更新UI
+        heart_timer_pause();
+        
+        // 先暂停LVGL显示刷新
+        if (lvgl_disp != NULL) {
+            lvgl_port_lock(0);
+            lv_disp_enable_invalidation(lvgl_disp, false);
+            lvgl_port_unlock();
+            ESP_LOGI(TAG, "LVGL display refresh paused");
+        }
+        
+        // 关闭背光
+        gpio_set_level(EXAMPLE_PIN_NUM_BK_LIGHT, EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL);
+        screen_on = false;
+        ESP_LOGI(TAG, "Screen turned off");
+        
+        // 配置触摸中断为唤醒源
+        esp_sleep_enable_ext1_wakeup(1ULL << 7, ESP_EXT1_WAKEUP_ANY_HIGH);
+        
+        // 进入轻睡眠模式，而不是深度睡眠
+        // 轻睡眠模式下，系统不会完全重启，而是会暂停执行
+        ESP_LOGI(TAG, "Entering light sleep mode");
+        esp_light_sleep_start();
+        
+        // 从轻睡眠唤醒后，不立即打开屏幕，而是等待触摸事件
+        // 这样可以避免屏幕在关闭后立即重新打开，形成循环
+        ESP_LOGI(TAG, "Woken up from light sleep");
+        
+        // 重新启用LVGL显示刷新
+        if (lvgl_disp != NULL) {
+            lvgl_port_lock(0);
+            lv_disp_enable_invalidation(lvgl_disp, true);
+            lvgl_port_unlock();
+            ESP_LOGI(TAG, "LVGL display refresh re-enabled");
+        }
+    }
+}
+
+/**
+ * @brief 屏幕定时器回调函数
+ */
+static void screen_timer_callback(TimerHandle_t timer)
+{
+    ESP_LOGI(TAG, "Screen timer expired, turning off screen");
+    screen_turn_off();
+}
+
+/**
+ * @brief 重置屏幕定时器
+ */
+void reset_screen_timer(void)
+{
+    if (screen_timer != NULL) {
+        if (xTimerReset(screen_timer, 0) == pdPASS) {
+            ESP_LOGD(TAG, "Screen timer reset");
+        }
+    }
+}
+
+/**
+ * @brief 初始化屏幕控制
+ */
+void screen_control_init(void)
+{
+    screen_timer = xTimerCreate("screen_timer", pdMS_TO_TICKS(5000), pdFALSE, NULL, screen_timer_callback);
+    if (screen_timer == NULL) {
+        ESP_LOGE(TAG, "Failed to create screen timer");
+    } else {
+        ESP_LOGI(TAG, "Screen timer created (5s timeout)");
+        xTimerStart(screen_timer, 0);
+    }
+}
 
 esp_err_t app_lcd_init(void)
 {
@@ -183,6 +312,12 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         
         if (point.event == TOUCH_EVENT_PRESS || point.event == TOUCH_EVENT_MOVE) {
             data->state = LV_INDEV_STATE_PRESSED;
+            
+            // 检测到触摸时唤醒屏幕并重置定时器
+            if (!screen_on) {
+                screen_turn_on();
+            }
+            reset_screen_timer();
         } else {
             data->state = LV_INDEV_STATE_RELEASED;
         }
@@ -225,6 +360,9 @@ esp_err_t app_lvgl_init(void)
         .timer_period_ms = 5
     };
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port initialization failed");
+
+    /* 初始化屏幕控制（触摸唤醒和自动息屏） */
+    screen_control_init();
 
     /* 添加LCD显示 */
     ESP_LOGD(TAG, "Add LCD screen");
