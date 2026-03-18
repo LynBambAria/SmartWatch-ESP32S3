@@ -20,4 +20,19 @@ esp_err_t app_lcd_init(void);
  */
 esp_err_t app_lvgl_init(void);
 
+/**
+ * @brief 打开屏幕背光
+ */
+void screen_turn_on(void);
+
+/**
+ * @brief 关闭屏幕背光
+ */
+void screen_turn_off(void);
+
+/**
+ * @brief 重置屏幕定时器
+ */
+void reset_screen_timer(void);
+
 #endif // LVGL_INIT_H
