@@ -15,3 +15,10 @@
 #include "driver/gpio.h"
 
 void max30102_init();
+void max30102_start_continuous_detection();
+void max30102_stop_continuous_detection();
+void max30102_start_idle_detection();
+void max30102_stop_idle_detection();
+
+extern bool sensor_active;
+extern uint8_t xinlv;

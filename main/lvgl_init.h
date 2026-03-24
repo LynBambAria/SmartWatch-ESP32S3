@@ -2,6 +2,7 @@
 #define LVGL_INIT_H
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
 #include "esp_lcd_panel_io.h"
 #include "lvgl.h"
 
@@ -9,6 +10,11 @@
 extern esp_lcd_panel_handle_t panel_handle;
 extern esp_lcd_panel_io_handle_t io_handle;
 extern lv_display_t *lvgl_disp;
+
+/* 外部声明：屏幕控制变量 */
+extern bool screen_on;
+extern TimerHandle_t screen_timer;
+extern void screen_timer_callback(TimerHandle_t timer);
 
 /**
  * @brief 初始化LCD显示

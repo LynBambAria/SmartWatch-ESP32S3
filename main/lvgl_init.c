@@ -31,8 +31,8 @@ static lv_indev_t *touch_indev = NULL;  // 静态变量，仅在当前文件使�
 // button_handle_t encoder_btn_handle = NULL;
 
 /* 屏幕背光控制变量 */
-static bool screen_on = true;
-static TimerHandle_t screen_timer = NULL;
+bool screen_on = true;
+TimerHandle_t screen_timer = NULL;
 
 // /* 编码器配置定义 */
 // const button_gpio_config_t encoder_btn_config = {
@@ -95,11 +95,8 @@ void screen_turn_on(void)
         gpio_set_level(EXAMPLE_PIN_NUM_BK_LIGHT, EXAMPLE_LCD_BK_LIGHT_ON_LEVEL);
         screen_on = true;
         
-        // 恢复心率定时器
-        heart_timer_resume();
-        
-        // 重新启动屏幕定时器
-        reset_screen_timer();
+        // 重新检测页面状态并重设定时器（这会恢复心率定时器如果需要）
+        reset_heart_screen_timer();
         
         ESP_LOGI(TAG, "Screen turned on");
     }
@@ -152,7 +149,7 @@ void screen_turn_off(void)
 /**
  * @brief 屏幕定时器回调函数
  */
-static void screen_timer_callback(TimerHandle_t timer)
+void screen_timer_callback(TimerHandle_t timer)
 {
     ESP_LOGI(TAG, "Screen timer expired, turning off screen");
     screen_turn_off();
@@ -307,25 +304,25 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     touch_point_t point = {0};
     
     if (touch_cst816s_poll(&point) && point.valid) {
-        data->point.x = point.x;
-        data->point.y = point.y;
-        
-        if (point.event == TOUCH_EVENT_PRESS || point.event == TOUCH_EVENT_MOVE) {
-            data->state = LV_INDEV_STATE_PRESSED;
+            data->point.x = point.x;
+            data->point.y = point.y;
             
-            // 检测到触摸时唤醒屏幕并重置定时器
-            if (!screen_on) {
-                screen_turn_on();
+            if (point.event == TOUCH_EVENT_PRESS || point.event == TOUCH_EVENT_MOVE) {
+                data->state = LV_INDEV_STATE_PRESSED;
+                
+                // 检测到触摸时唤醒屏幕并重置定时器
+                if (!screen_on) {
+                    screen_turn_on();
+                }
+                reset_heart_screen_timer();
+            } else {
+                data->state = LV_INDEV_STATE_RELEASED;
             }
-            reset_screen_timer();
+            
+            ESP_LOGD(TAG, "Touch: x=%d, y=%d, event=%d", point.x, point.y, point.event);
         } else {
             data->state = LV_INDEV_STATE_RELEASED;
         }
-        
-        ESP_LOGD(TAG, "Touch: x=%d, y=%d, event=%d", point.x, point.y, point.event);
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
 }
 
 // //已集成到app_lvgl_init()内

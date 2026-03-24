@@ -18,6 +18,8 @@ extern "C" {
 void custom_init(lv_ui *ui);
 void heart_timer_pause(void);
 void heart_timer_resume(void);
+void reset_heart_screen_timer(void);
+void enter_heart_page_immediately(void);
 
 #ifdef __cplusplus
 }

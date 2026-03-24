@@ -16,6 +16,11 @@
 #include "freemaster_client.h"
 #endif
 
+static void reset_timer_cb(lv_timer_t *timer)
+{
+    reset_heart_screen_timer();
+    lv_timer_delete(timer);
+}
 
 static void screen_event_handler (lv_event_t *e)
 {
@@ -58,6 +63,8 @@ static void screen_imgbtn_1_event_handler (lv_event_t *e)
     case LV_EVENT_CLICKED:
     {
         ui_load_scr_animation(&guider_ui, &guider_ui.heart, guider_ui.heart_del, &guider_ui.screen_del, setup_scr_heart, LV_SCR_LOAD_ANIM_MOVE_TOP, 200, 200, true, false);
+        enter_heart_page_immediately();
+        lv_timer_create(reset_timer_cb, 250, NULL);
         break;
     }
     default:
@@ -82,9 +89,9 @@ static void heart_event_handler (lv_event_t *e)
         case LV_DIR_RIGHT:
         {
             lv_indev_wait_release(lv_indev_active());
-            // 暂停心率定时器，避免访问已销毁的UI元素
-            heart_timer_pause();
             ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.heart_del, setup_scr_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 200, true, true);
+            enter_heart_page_immediately();
+            lv_timer_create(reset_timer_cb, 250, NULL);
             break;
         }
         default:
@@ -103,9 +110,9 @@ static void heart_label_1_event_handler (lv_event_t *e)
     switch (code) {
     case LV_EVENT_CLICKED:
     {
-        // 暂停心率定时器，避免访问已销毁的UI元素
-        heart_timer_pause();
         ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.heart_del, setup_scr_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 200, true, true);
+        // 从heart页面返回主页面，不需要立即进入
+        lv_timer_create(reset_timer_cb, 250, NULL);
         break;
     }
     default:

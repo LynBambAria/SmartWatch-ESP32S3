@@ -21,7 +21,54 @@ static const char *TAG = "max30102";
 bool sensor_active = false;
 static bool sensor_present = false;
 
+// 检测模式控制
+typedef enum {
+    DETECT_MODE_IDLE = 0,       // 闲置模式：15分钟检测一次，每次15秒
+    DETECT_MODE_CONTINUOUS      // 持续检测模式：一直检测
+} detect_mode_t;
+
+static detect_mode_t detect_mode = DETECT_MODE_IDLE;
+static bool in_heart_page = false;  // 是否在心率页面
+
 uint8_t xinlv = 0;           // 计算得到的心率值
+
+// 静态函数前向声明
+static esp_err_t max30102_register_write_byte(uint8_t reg_addr, uint8_t data);
+static esp_err_t max30102_register_read(uint8_t reg_addr, uint8_t *data, size_t len);
+static esp_err_t max30102_register_write_with_retry(uint8_t reg_addr, uint8_t data, int max_retries);
+static esp_err_t max30102_register_read_with_retry(uint8_t reg_addr, uint8_t *data, size_t len, int max_retries);
+
+// 检测控制函数
+void max30102_start_continuous_detection()
+{
+    in_heart_page = true;
+    detect_mode = DETECT_MODE_CONTINUOUS;
+    ESP_LOGI(TAG, "进入心率页面，启动持续检测模式");
+}
+
+void max30102_stop_continuous_detection()
+{
+    in_heart_page = false;
+    detect_mode = DETECT_MODE_IDLE;
+    sensor_active = false;
+    // 降低LED亮度以节省功耗
+    if (sensor_present) {
+        max30102_register_write_with_retry(0x0c, 0x10, 3);
+        max30102_register_write_with_retry(0x0d, 0x10, 3);
+    }
+    ESP_LOGI(TAG, "退出心率页面，停止持续检测模式");
+}
+
+void max30102_start_idle_detection()
+{
+    detect_mode = DETECT_MODE_IDLE;
+    ESP_LOGI(TAG, "启动闲置检测模式");
+}
+
+void max30102_stop_idle_detection()
+{
+    // 闲置模式不需要停止
+}
 
 /**
  * @brief init the i2c port for MAX30102
@@ -230,80 +277,148 @@ void get_temp()
 void gpio_intr_task()
 {
     uint8_t buffer[6];
-    int data[2];
-    float xueyang;
-    // uint8_t xinlv;
+    uint32_t data[2];
+    float xueyang = 0;
     int error_count = 0;
+    
+    // 闲置模式相关变量
+    uint32_t last_idle_detect_start = 0;
+    bool in_idle_detect = false;
+    uint32_t last_activity_time = 0;
+    
+    ESP_LOGI(TAG, "MAX30102 polling task started");
     
     // 定期检查是否有物体靠近传感器
     while (1) {
-        // 检查传感器是否存在
-        if (sensor_present) {
-            // 读取传感器数据
-            esp_err_t err = max30102_register_read(0x07, &buffer[0], 6);
-            if (err == ESP_OK) {
-                error_count = 0; // 重置错误计数
-                data[0] = ((buffer[0] << 16 | buffer[1] << 8 | buffer[2]) & 0x03ffff);
-                data[1] = ((buffer[3] << 16 | buffer[4] << 8 | buffer[5]) & 0x03ffff);
+        // 根据检测模式执行不同的逻辑
+        if (detect_mode == DETECT_MODE_CONTINUOUS) {
+            // 持续检测模式：在心率页面，一直检测
+            if (sensor_present) {
+                esp_err_t err = max30102_register_read(0x07, &buffer[0], 6);
+                if (err == ESP_OK) {
+                    error_count = 0;
+                    data[0] = ((buffer[0] << 16 | buffer[1] << 8 | buffer[2]) & 0x03ffff);
+                    data[1] = ((buffer[3] << 16 | buffer[4] << 8 | buffer[5]) & 0x03ffff);
 
-                // 检测是否有物体靠近（光被挡住）
-                if (data[0] >= 50000) {  // 阈值可以根据实际情况调整
-                    if (!sensor_active) {
-                        // 检测到物体靠近，开始正常检测
-                        ESP_LOGI(TAG, "检测到物体靠近，开始血氧和心率检测");
-                        sensor_active = true;
-                        
-                        // 增加LED亮度以获得更好的信号
-                        esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x7f, 3); // LED1_PA(red) = 0x7f, 最大亮度
-                        if (led_err == ESP_OK) {
-                            max30102_register_write_with_retry(0x0d, 0x7f, 3); // LED2_PA(IR) = 0x7f, 最大亮度
+                    if (data[0] >= 50000) {
+                        if (!sensor_active) {
+                            ESP_LOGI(TAG, "检测到物体靠近，开始血氧和心率检测");
+                            sensor_active = true;
+                            esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x7f, 3);
+                            if (led_err == ESP_OK) {
+                                max30102_register_write_with_retry(0x0d, 0x7f, 3);
+                            }
+                        }
+
+                        if (sensor_active && data[0] >= 100000) {
+                            xueyang = (float)(data[1]) / (float)(data[0]);
+                            xinlv = 30.354 * xueyang + 94.845 - 45.060 * xueyang * xueyang;
+                            printf("血氧:%f,心率:%d\n", xueyang * 100, xinlv);
+                        }
+                    } else {
+                        if (sensor_active) {
+                            ESP_LOGI(TAG, "物体移开，停止血氧和心率检测");
+                            sensor_active = false;
+                            esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x10, 3);
+                            if (led_err == ESP_OK) {
+                                max30102_register_write_with_retry(0x0d, 0x10, 3);
+                            }
+                            printf("没有手指检测\n");
                         }
                     }
 
-                    // 只有当传感器激活时才计算和输出数据
-                    if (sensor_active && data[0] >= 100000) {
-                        xueyang = (float)(data[1]) / (float)(data[0]);
-                        xinlv = 30.354 * xueyang + 94.845 - 45.060 * xueyang * xueyang;
-                        printf("血氧:%f,心率:%d\n", xueyang * 100, xinlv);
+                    uint8_t status_data;
+                    max30102_register_read(0x00, &status_data, 1);
+                    max30102_register_read(0x01, &status_data, 1);
+                } else {
+                    error_count++;
+                    if (error_count % 10 == 0) {
+                        ESP_LOGE(TAG, "Failed to read sensor data: %s (error count: %d)", esp_err_to_name(err), error_count);
+                    }
+                    if (error_count > 20) {
+                        ESP_LOGE(TAG, "Too many consecutive errors, pausing for 5 seconds");
+                        vTaskDelay(pdMS_TO_TICKS(5000));
+                        error_count = 0;
+                    }
+                }
+                vTaskDelay(pdMS_TO_TICKS(200));
+            } else {
+                ESP_LOGI(TAG, "MAX30102 sensor not present, reducing polling frequency");
+                vTaskDelay(pdMS_TO_TICKS(5000));
+            }
+        } else {
+            // 闲置模式：不在心率页面，3分钟检测一次，每次检测10秒
+            uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            
+            if (!in_idle_detect) {
+                // 不在闲置检测中，检查是否需要开始检测
+                if (current_time - last_activity_time >= 3 * 60 * 1000) { // 3分钟
+                    ESP_LOGI(TAG, "开始闲置检测，持续10秒");
+                    in_idle_detect = true;
+                    last_idle_detect_start = current_time;
+                    if (sensor_present) {
+                        max30102_register_write_with_retry(0x0c, 0x7f, 3);
+                        max30102_register_write_with_retry(0x0d, 0x7f, 3);
                     }
                 } else {
-                    if (sensor_active) {
-                        // 物体移开，停止检测
-                        ESP_LOGI(TAG, "物体移开，停止血氧和心率检测");
-                        sensor_active = false;
-                        
-                        // 降低LED亮度以节省功耗
-                        esp_err_t led_err = max30102_register_write_with_retry(0x0c, 0x10, 3); // LED1_PA(red) = 0x10, 低亮度
-                        if (led_err == ESP_OK) {
-                            max30102_register_write_with_retry(0x0d, 0x10, 3); // LED2_PA(IR) = 0x10, 低亮度
-                        }
-                        printf("没有手指检测\n");
-                    }
+                    vTaskDelay(pdMS_TO_TICKS(30000)); // 每30秒检查一次
+                    continue;
                 }
-
-                // clear PPG_RDY ! Cannot receive the first interrupt without clearing !
-                uint8_t status_data;
-                max30102_register_read(0x00, &status_data, 1);
-                max30102_register_read(0x01, &status_data, 1);
             } else {
-                error_count++;
-                if (error_count % 10 == 0) { // 每10次错误才打印一次，避免日志刷屏
-                    ESP_LOGE(TAG, "Failed to read sensor data: %s (error count: %d)", esp_err_to_name(err), error_count);
+                // 在闲置检测中
+                uint32_t idle_detect_duration = current_time - last_idle_detect_start;
+                
+                if (idle_detect_duration >= 10 * 1000) { // 10秒
+                    ESP_LOGI(TAG, "闲置检测结束");
+                    in_idle_detect = false;
+                    last_activity_time = current_time;
+                    sensor_active = false;
+                    if (sensor_present) {
+                        max30102_register_write_with_retry(0x0c, 0x10, 3);
+                        max30102_register_write_with_retry(0x0d, 0x10, 3);
+                    }
+                    continue;
                 }
-                // 如果连续错误超过20次，可能是硬件问题，暂停一段时间
-                if (error_count > 20) {
-                    ESP_LOGE(TAG, "Too many consecutive errors, pausing for 5 seconds");
+                
+                if (sensor_present) {
+                    esp_err_t err = max30102_register_read(0x07, &buffer[0], 6);
+                    if (err == ESP_OK) {
+                        error_count = 0;
+                        data[0] = ((buffer[0] << 16 | buffer[1] << 8 | buffer[2]) & 0x03ffff);
+                        data[1] = ((buffer[3] << 16 | buffer[4] << 8 | buffer[5]) & 0x03ffff);
+
+                        if (data[0] >= 50000) {
+                            if (!sensor_active) {
+                                ESP_LOGI(TAG, "闲置检测中发现物体，开始血氧和心率检测");
+                                sensor_active = true;
+                            }
+
+                            if (sensor_active && data[0] >= 100000) {
+                                xueyang = (float)(data[1]) / (float)(data[0]);
+                                xinlv = 30.354 * xueyang + 94.845 - 45.060 * xueyang * xueyang;
+                                printf("闲置检测 - 血氧:%f,心率:%d\n", xueyang * 100, xinlv);
+                            }
+                        } else {
+                            if (sensor_active) {
+                                ESP_LOGI(TAG, "闲置检测中物体移开");
+                                sensor_active = false;
+                            }
+                        }
+
+                        uint8_t status_data;
+                        max30102_register_read(0x00, &status_data, 1);
+                        max30102_register_read(0x01, &status_data, 1);
+                    } else {
+                        error_count++;
+                        if (error_count % 10 == 0) {
+                            ESP_LOGE(TAG, "Failed to read sensor data: %s (error count: %d)", esp_err_to_name(err), error_count);
+                        }
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                } else {
                     vTaskDelay(pdMS_TO_TICKS(5000));
-                    error_count = 0;
                 }
             }
-            
-            // 控制检测频率，避免过于频繁的读取
-            vTaskDelay(pdMS_TO_TICKS(200)); // 增加延迟到200毫秒，减少I2C操作频率
-        } else {
-            // 传感器不存在，降低轮询频率，减少系统负担
-            ESP_LOGI(TAG, "MAX30102 sensor not present, reducing polling frequency");
-            vTaskDelay(pdMS_TO_TICKS(5000)); // 5秒检查一次
         }
     }
 }
@@ -327,7 +442,7 @@ void max30102_init()
     }
 
     // 启动传感器轮询任务，增加堆栈大小以避免堆栈溢出
-    xTaskCreate(gpio_intr_task, "max30102_poll", 4096, NULL, 5, NULL);
+    xTaskCreate(gpio_intr_task, "max30102_poll", 8192, NULL, 5, NULL);
     ESP_LOGI(TAG, "MAX30102 sensor polling task started with increased stack size");
 
     // 先尝试读取设备ID，确认I2C连接是否正常
