@@ -1,6 +1,7 @@
 #include "lvgl_init.h"
 #include "touch_cst816s.h"
 #include "max30102.h"
+#include "adxl345.h"
 #include "gatts_table_creat_demo.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -67,6 +68,9 @@ void app_main(void)
     
     /* 初始化MAX30102传感器 */
     max30102_init();
+    
+    /* 初始化ADXL345加速度传感器 */
+    adxl345_init();
     
     ESP_LOGI(TAG, "Running");
 }

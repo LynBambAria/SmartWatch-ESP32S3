@@ -4,6 +4,7 @@ set(INCLUDES "." "./ui/generated" "./ui/generated/guider_customer_fonts" "./ui/g
 set(MAIN_SOURCES
     main.c
     max30102.c
+    adxl345.c
     gatts_table_creat_demo.c
     touch_cst816s.c
     lvgl_init.c

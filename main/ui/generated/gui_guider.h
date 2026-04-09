@@ -65,10 +65,10 @@ extern lv_ui guider_ui;
 
 void setup_scr_screen(lv_ui *ui);
 void setup_scr_heart(lv_ui *ui);
-LV_IMAGE_DECLARE(_steps_RGB565A8_50x50);
-LV_IMAGE_DECLARE(_steps_change_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_heart_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_heart_change_RGB565A8_50x50);
+LV_IMAGE_DECLARE(_steps_RGB565A8_50x50);
+LV_IMAGE_DECLARE(_steps_change_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_settings_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_settings_change_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_check_heart_RGB565A8_40x40);

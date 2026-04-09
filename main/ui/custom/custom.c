@@ -7,6 +7,7 @@
 #include "custom.h"
 #include "max30102.h"
 #include "lvgl_init.h"
+#include "gatts_table_creat_demo.h"
 #include <stdio.h>
 
 // ========== 心率页面相关 ==========
@@ -62,6 +63,7 @@ static void heart_page_timer_cb(lv_timer_t *timer)
                     heart_state = HEART_SHOW_RESULT;
                     snprintf(text_buf, sizeof(text_buf), "Heart Rate: %d BPM", xinlv);
                     lv_label_set_text(g_ui->heart_label_2, text_buf);
+                    ble_send_heart_rate(xinlv);
                 }
                 lv_bar_set_value(g_ui->heart_bar_1, progress, LV_ANIM_OFF);
             }
@@ -76,6 +78,7 @@ static void heart_page_timer_cb(lv_timer_t *timer)
             } else {
                 snprintf(text_buf, sizeof(text_buf), "Heart Rate: %d BPM", xinlv);
                 lv_label_set_text(g_ui->heart_label_2, text_buf);
+                ble_send_heart_rate(xinlv);
             }
             break;
     }

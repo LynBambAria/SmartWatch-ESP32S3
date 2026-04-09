@@ -1,1 +1,1 @@
-GEN_CSRCS += _steps_RGB565A8_50x50.c _steps_change_RGB565A8_50x50.c _heart_RGB565A8_50x50.c _heart_change_RGB565A8_50x50.c _settings_RGB565A8_50x50.c _settings_change_RGB565A8_50x50.c _check_heart_RGB565A8_40x40.c
+GEN_CSRCS += _heart_RGB565A8_50x50.c _heart_change_RGB565A8_50x50.c _steps_RGB565A8_50x50.c _steps_change_RGB565A8_50x50.c _settings_RGB565A8_50x50.c _settings_change_RGB565A8_50x50.c _check_heart_RGB565A8_40x40.c
