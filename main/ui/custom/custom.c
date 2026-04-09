@@ -6,6 +6,7 @@
 #include "gui_guider.h"
 #include "custom.h"
 #include "max30102.h"
+#include "adxl345.h"
 #include "lvgl_init.h"
 #include "gatts_table_creat_demo.h"
 #include <stdio.h>
@@ -290,6 +291,10 @@ void custom_init(lv_ui *ui)
     
     // 初始化屏幕定时器状态
     reset_heart_screen_timer();
+    
+    // 设置ADXL345的UI指针，用于更新步数页面显示
+    adxl345_set_ui_ptr(ui);
+    ESP_LOGI("CUSTOM", "ADXL345 UI pointer set");
 }
 
 void enter_heart_page_immediately(void)

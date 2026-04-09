@@ -105,7 +105,7 @@ void setup_scr_screen(lv_ui *ui)
 
     //Write codes screen_imgbtn_1
     ui->screen_imgbtn_1 = lv_imagebutton_create(ui->screen_cont_1);
-    lv_obj_set_pos(ui->screen_imgbtn_1, 22, 20);
+    lv_obj_set_pos(ui->screen_imgbtn_1, 22, 19);
     lv_obj_set_size(ui->screen_imgbtn_1, 50, 50);
     lv_obj_add_flag(ui->screen_imgbtn_1, LV_OBJ_FLAG_CHECKABLE);
     lv_imagebutton_set_src(ui->screen_imgbtn_1, LV_IMAGEBUTTON_STATE_RELEASED, &_heart_RGB565A8_50x50, NULL, NULL);
@@ -147,7 +147,7 @@ void setup_scr_screen(lv_ui *ui)
 
     //Write codes screen_imgbtn_2
     ui->screen_imgbtn_2 = lv_imagebutton_create(ui->screen_cont_1);
-    lv_obj_set_pos(ui->screen_imgbtn_2, 96, 20);
+    lv_obj_set_pos(ui->screen_imgbtn_2, 96, 19);
     lv_obj_set_size(ui->screen_imgbtn_2, 50, 50);
     lv_obj_add_flag(ui->screen_imgbtn_2, LV_OBJ_FLAG_CHECKABLE);
     lv_imagebutton_set_src(ui->screen_imgbtn_2, LV_IMAGEBUTTON_STATE_RELEASED, &_steps_RGB565A8_50x50, NULL, NULL);

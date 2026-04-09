@@ -1,4 +1,12 @@
 #include "adxl345.h"
+#include "driver/i2c.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "gui_guider.h"
+#include "lvgl.h"
+#include "esp_lvgl_port.h"
+#include "gatts_table_creat_demo.h"
 #include <math.h>
 #include <inttypes.h>
 
@@ -30,6 +38,16 @@ static bool step_detected = false;
 static uint32_t last_step_time = 0;
 static float accel_history[WINDOW_SIZE];
 static int history_index = 0;
+
+static float current_x = 0.0f;
+static float current_y = 0.0f;
+static float current_z = 0.0f;
+static lv_ui *ui_ptr = NULL;
+
+void adxl345_set_ui_ptr(lv_ui *ui)
+{
+    ui_ptr = ui;
+}
 
 static esp_err_t adxl345_register_write_byte(uint8_t reg_addr, uint8_t data);
 static esp_err_t adxl345_register_read(uint8_t reg_addr, uint8_t *data, size_t len);
@@ -126,6 +144,7 @@ static int detect_step(float x, float y, float z)
             step_count++;
             last_step_time = current_time;
             step_detected = false;
+            ble_send_steps(step_count);
             return 1;
         }
         step_detected = false;
@@ -166,6 +185,10 @@ static void adxl345_read_task(void *pvParam)
                 y_g = (float)y / 256.0f;
                 z_g = (float)z / 256.0f;
 
+                current_x = x_g;
+                current_y = y_g;
+                current_z = z_g;
+
                 int step_detected = detect_step(x_g, y_g, z_g);
                 if (step_detected) {
                     ESP_LOGI(TAG, "Step detected! Total steps: %" PRIu32, step_count);
@@ -174,6 +197,20 @@ static void adxl345_read_task(void *pvParam)
                 if (step_count != last_log_step_count) {
                     ESP_LOGI(TAG, "X: %.2f g, Y: %.2f g, Z: %.2f g | Steps: %" PRIu32, x_g, y_g, z_g, step_count);
                     last_log_step_count = step_count;
+                }
+
+                if (ui_ptr != NULL && ui_ptr->step != NULL) {
+                    lvgl_port_lock(0);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "X: %.2f", current_x);
+                    lv_label_set_text(ui_ptr->step_x_g, buf);
+                    snprintf(buf, sizeof(buf), "Y: %.2f", current_y);
+                    lv_label_set_text(ui_ptr->step_y_g, buf);
+                    snprintf(buf, sizeof(buf), "Z: %.2f", current_z);
+                    lv_label_set_text(ui_ptr->step_z_g, buf);
+                    snprintf(buf, sizeof(buf), "%" PRIu32 " Step", step_count);
+                    lv_label_set_text(ui_ptr->step_step_count, buf);
+                    lvgl_port_unlock();
                 }
             } else {
                 error_count++;

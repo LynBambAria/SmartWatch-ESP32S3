@@ -14,5 +14,8 @@
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 
+#include "gui_guider.h"
+
 void adxl345_init(void);
 uint32_t adxl345_get_step_count(void);
+void adxl345_set_ui_ptr(lv_ui *ui);

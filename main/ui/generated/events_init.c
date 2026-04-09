@@ -62,9 +62,21 @@ static void screen_imgbtn_1_event_handler (lv_event_t *e)
     switch (code) {
     case LV_EVENT_CLICKED:
     {
-        ui_load_scr_animation(&guider_ui, &guider_ui.heart, guider_ui.heart_del, &guider_ui.screen_del, setup_scr_heart, LV_SCR_LOAD_ANIM_MOVE_TOP, 200, 200, true, false);
-        enter_heart_page_immediately();
-        lv_timer_create(reset_timer_cb, 250, NULL);
+        ui_load_scr_animation(&guider_ui, &guider_ui.heart, guider_ui.heart_del, &guider_ui.screen_del, setup_scr_heart, LV_SCR_LOAD_ANIM_MOVE_TOP, 200, 200, true, true);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void screen_imgbtn_2_event_handler (lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    switch (code) {
+    case LV_EVENT_CLICKED:
+    {
+        ui_load_scr_animation(&guider_ui, &guider_ui.step, guider_ui.step_del, &guider_ui.screen_del, setup_scr_step, LV_SCR_LOAD_ANIM_MOVE_TOP, 200, 200, true, true);
         break;
     }
     default:
@@ -76,6 +88,7 @@ void events_init_screen (lv_ui *ui)
 {
     lv_obj_add_event_cb(ui->screen, screen_event_handler, LV_EVENT_ALL, ui);
     lv_obj_add_event_cb(ui->screen_imgbtn_1, screen_imgbtn_1_event_handler, LV_EVENT_ALL, ui);
+    lv_obj_add_event_cb(ui->screen_imgbtn_2, screen_imgbtn_2_event_handler, LV_EVENT_ALL, ui);
 }
 
 static void heart_event_handler (lv_event_t *e)
@@ -90,8 +103,6 @@ static void heart_event_handler (lv_event_t *e)
         {
             lv_indev_wait_release(lv_indev_active());
             ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.heart_del, setup_scr_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 200, true, true);
-            enter_heart_page_immediately();
-            lv_timer_create(reset_timer_cb, 250, NULL);
             break;
         }
         default:
@@ -124,6 +135,50 @@ void events_init_heart (lv_ui *ui)
 {
     lv_obj_add_event_cb(ui->heart, heart_event_handler, LV_EVENT_ALL, ui);
     lv_obj_add_event_cb(ui->heart_label_1, heart_label_1_event_handler, LV_EVENT_ALL, ui);
+}
+
+static void step_event_handler (lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    switch (code) {
+    case LV_EVENT_GESTURE:
+    {
+        lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+        switch(dir) {
+        case LV_DIR_RIGHT:
+        {
+            lv_indev_wait_release(lv_indev_active());
+            ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.step_del, setup_scr_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 200, true, true);
+            break;
+        }
+        default:
+            break;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void step_step_back_event_handler (lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    switch (code) {
+    case LV_EVENT_CLICKED:
+    {
+        ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.step_del, setup_scr_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 200, true, true);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void events_init_step (lv_ui *ui)
+{
+    lv_obj_add_event_cb(ui->step, step_event_handler, LV_EVENT_ALL, ui);
+    lv_obj_add_event_cb(ui->step_step_back, step_step_back_event_handler, LV_EVENT_ALL, ui);
 }
 
 

@@ -36,6 +36,14 @@ typedef struct
 	lv_obj_t *heart_label_2;
 	lv_obj_t *heart_bar_1;
 	lv_obj_t *heart_img_1;
+	lv_obj_t *step;
+	bool step_del;
+	lv_obj_t *step_step_count;
+	lv_obj_t *step_z_g;
+	lv_obj_t *step_y_g;
+	lv_obj_t *step_x_g;
+	lv_obj_t *step_label_1;
+	lv_obj_t *step_step_back;
 }lv_ui;
 
 typedef void (*ui_setup_scr_t)(lv_ui * ui);
@@ -65,6 +73,7 @@ extern lv_ui guider_ui;
 
 void setup_scr_screen(lv_ui *ui);
 void setup_scr_heart(lv_ui *ui);
+void setup_scr_step(lv_ui *ui);
 LV_IMAGE_DECLARE(_heart_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_heart_change_RGB565A8_50x50);
 LV_IMAGE_DECLARE(_steps_RGB565A8_50x50);
@@ -78,6 +87,8 @@ LV_FONT_DECLARE(lv_font_montserratMedium_65)
 LV_FONT_DECLARE(lv_font_montserratMedium_12)
 LV_FONT_DECLARE(lv_font_montserratMedium_15)
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_16)
+LV_FONT_DECLARE(lv_font_montserratMedium_26)
+LV_FONT_DECLARE(lv_font_montserratMedium_21)
 
 
 #ifdef __cplusplus
